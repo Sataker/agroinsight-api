@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.config import get_settings
-from src.api.routes import auth, precos, clima, alertas, recomendacoes, fazendas, safra, insumos
+from src.api.routes import auth, precos, clima, alertas, recomendacoes, fazendas, safra, insumos, pipelines
 
 
 @asynccontextmanager
@@ -10,8 +10,15 @@ async def lifespan(app: FastAPI):
     # Startup
     settings = get_settings()
     print(f"AgroInsight API starting on {settings.host}:{settings.port} [{settings.env}]")
+
+    # Iniciar scheduler de pipelines
+    from src.services.scheduler import setup_scheduler, shutdown_scheduler
+    setup_scheduler()
+
     yield
+
     # Shutdown
+    shutdown_scheduler()
     print("AgroInsight API shutting down")
 
 
@@ -44,6 +51,7 @@ app.include_router(insumos.router, prefix="/api/v1/insumos", tags=["Insumos"])
 app.include_router(safra.router, prefix="/api/v1/safra", tags=["Safra"])
 app.include_router(alertas.router, prefix="/api/v1/alertas", tags=["Alertas"])
 app.include_router(recomendacoes.router, prefix="/api/v1/recomendacoes", tags=["Recomendacoes"])
+app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["Pipelines"])
 
 
 @app.get("/")
