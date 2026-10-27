@@ -197,6 +197,45 @@ Formato de saida (JSON array):
 Se nao houver dados suficientes para alguma analise, diga explicitamente."""
 
 
+TIPOS_VALIDOS = {"PLANTIO", "COMPRA_INSUMO", "VENDA", "ALERTA_CLIMA", "CULTURA_EMERGENTE"}
+PRIORIDADES_VALIDAS = {"URGENTE", "ALTA", "MEDIA", "BAIXA"}
+
+
+def parse_recomendacoes(content: str) -> list[dict]:
+    """Converte a resposta do modelo em recomendacoes validas.
+
+    Aceita JSON puro ou dentro de bloco ```json. Descarta itens com tipo/prioridade
+    fora do contrato do prompt ou sem titulo, e limita a confianca a [0, 1].
+    Levanta json.JSONDecodeError se o texto nao for JSON.
+    """
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1] if "\n" in content else ""
+        content = content.rsplit("```", 1)[0]
+
+    data = json.loads(content)
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return []
+
+    validas = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if item.get("tipo") not in TIPOS_VALIDOS or item.get("prioridade") not in PRIORIDADES_VALIDAS:
+            continue
+        if not str(item.get("titulo", "")).strip():
+            continue
+        try:
+            confianca = float(item.get("confianca", 0.5))
+        except (TypeError, ValueError):
+            confianca = 0.5
+        item["confianca"] = min(max(confianca, 0.0), 1.0)
+        validas.append(item)
+    return validas
+
+
 async def gerar_recomendacoes(db: AsyncSession, user: User, fazenda: Fazenda) -> list[dict]:
     """Gera recomendacoes usando Claude API baseado nos dados coletados."""
     settings = get_settings()
@@ -221,11 +260,11 @@ Gere de 1 a 5 recomendacoes mais relevantes para este momento. Priorize:
 Responda APENAS com o JSON array, sem texto adicional."""
 
     try:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+        response = await client.messages.create(
+            model="claude-sonnet-5-5",
+            max_tokens=8000,
             system=[{
                 "type": "text",
                 "text": SYSTEM_PROMPT,
@@ -234,13 +273,9 @@ Responda APENAS com o JSON array, sem texto adicional."""
             messages=[{"role": "user", "content": user_message}],
         )
 
-        content = response.content[0].text.strip()
-        # Extrair JSON do response (pode vir com ```json wrapper)
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1]
-            content = content.rsplit("```", 1)[0]
-
-        recomendacoes_raw = json.loads(content)
+        # Current models may return thinking blocks before the answer: take the first text block.
+        content = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
+        recomendacoes_raw = parse_recomendacoes(content)
         logger.info("ia_engine_generated", count=len(recomendacoes_raw),
                     input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens)

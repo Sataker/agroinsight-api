@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     uazapi_token: str = ""
     uazapi_instance: str = ""
 
+    # Comma-separated list of origins allowed to call the API (the Next.js dashboard)
+    cors_origins: str = "http://localhost:3000,http://localhost:3200"
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
@@ -33,4 +36,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if settings.env != "development" and settings.jwt_secret == "change-me":
+        raise RuntimeError("JWT_SECRET must be set outside development")
+    return settings
